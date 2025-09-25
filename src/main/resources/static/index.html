@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bài Kiểm Tra Giỏ Hàng</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --mau-nen: #f7f8fc; --mau-trang: #ffffff; --mau-chu-chinh: #0a1e42;
+            --mau-chu-phu: #5e6c84; --mau-vien: #dfe1e6; --mau-den: #000000;
+            --mau-gradient: linear-gradient(90deg, #6559ff, #473bff); --vien-mem: 12px;
+            --box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        }
+        body { font-family: 'Poppins', sans-serif; background-color: var(--mau-nen); color: var(--mau-chu-chinh); margin: 0; padding: 2rem; }
+        .container-gio-hang { display: grid; grid-template-columns: 2fr 1fr; gap: 2rem; max-width: 1200px; margin: auto; }
+        .danh-sach-san-pham, .tom-tat-don-hang { background: var(--mau-trang); border-radius: var(--vien-mem); padding: 1.5rem 2rem; box-shadow: var(--box-shadow); }
+        .header-gio-hang { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--mau-vien); padding-bottom: 1rem; margin-bottom: 1rem; }
+        .header-gio-hang h1 { font-size: 1.5rem; margin: 0; }
+        #so-luong-muc { font-size: 1rem; color: var(--mau-chu-phu); }
+        .san-pham { display: grid; grid-template-columns: auto 80px 1fr 120px 100px auto; gap: 1.5rem; align-items: center; padding: 1rem 0; border-bottom: 1px solid var(--mau-vien); }
+        .san-pham:last-child { border-bottom: none; }
+        .san-pham img { width: 80px; height: 80px; border-radius: 8px; object-fit: cover; }
+        .thong-tin-san-pham h4 { margin: 0 0 0.25rem; font-size: 1rem; font-weight: 600; }
+        .mo-ta-san-pham { margin: 0; font-size: 0.875rem; color: var(--mau-chu-phu); }
+        .gia-san-pham { font-weight: 500; color: var(--mau-chu-phu); margin: 0.5rem 0 0; }
+        .dieu-khien-so-luong { display: flex; align-items: center; justify-content: center; background-color: var(--mau-nen); border-radius: 20px; }
+        .dieu-khien-so-luong button { background: none; border: none; cursor: pointer; font-size: 1.2rem; padding: 0.5rem 0.75rem; color: var(--mau-chu-phu); }
+        .so-luong { font-weight: 600; padding: 0 0.5rem; }
+        .tong-tien-san-pham { font-weight: 600; font-size: 1.1rem; text-align: right; }
+        .btn-xoa-san-pham { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--mau-chu-phu); transition: color 0.2s; }
+        .btn-xoa-san-pham:hover { color: #ff5630; }
+        .checkbox-container { display: inline-block; }
+        .checkbox-san-pham { display: none; }
+        .checkbox-san-pham + label { display: inline-block; width: 22px; height: 22px; border: 2px solid var(--mau-vien); border-radius: 6px; cursor: pointer; position: relative; transition: all 0.2s; }
+        .checkbox-san-pham:checked + label { background-color: var(--mau-den); border-color: var(--mau-den); }
+        .checkbox-san-pham:checked + label::after { content: '✔'; font-size: 14px; color: var(--mau-trang); position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+        .tom-tat-don-hang { background: var(--mau-trang); border-radius: var(--vien-mem); padding: 1.5rem 2rem; box-shadow: var(--box-shadow); position: sticky; top: 2rem; }
+        .tom-tat-don-hang h2 { font-size: 1.25rem; margin: 0 0 1.5rem; border-bottom: 1px solid var(--mau-vien); padding-bottom: 1rem; }
+        .chi-tiet-gia div { display: flex; justify-content: space-between; margin-bottom: 1rem; color: var(--mau-chu-phu); font-size: 1rem; }
+        .chi-tiet-gia .tong-cong { font-size: 1.1rem; font-weight: 600; color: var(--mau-chu-chinh); margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--mau-vien); }
+        .btn-thanh-toan { width: 100%; padding: 1rem; border: none; background: var(--mau-gradient); color: var(--mau-trang); font-size: 1.1rem; font-weight: bold; border-radius: 8px; cursor: pointer; margin-top: 1rem; transition: transform 0.2s, box-shadow 0.2s; }
+        .btn-thanh-toan:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(71, 59, 255, 0.3); }
+        .btn-thanh-toan:disabled { background: #ccc; cursor: not-allowed; transform: none; box-shadow: none; }
+        #thong-bao-chon-mon { color: #ff5630; text-align: center; font-size: 0.875rem; margin-top: 1rem; }
+        .hidden { display: none; }
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); justify-content: center; align-items: center; }
+        .modal-content { background-color: var(--mau-nen); width: 100%; max-width: 400px; border-radius: var(--vien-mem); box-shadow: 0 5px 25px rgba(0,0,0,0.2); position: relative; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.5rem; background-color: #e9ecef; border-top-left-radius: var(--vien-mem); border-top-right-radius: var(--vien-mem); }
+        .modal-header h2 { font-size: 1.1rem; margin: 0; color: var(--mau-chu-phu); }
+        .close-button { font-size: 1.5rem; cursor: pointer; border: none; background: none; }
+        .modal-body { padding: 1.5rem; }
+        .payment-tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+        .tab-button { flex: 1; padding: 0.75rem; font-size: 1rem; font-weight: 500; border: 1px solid var(--mau-vien); background-color: var(--mau-trang); border-radius: 8px; cursor: pointer; transition: all 0.2s; }
+        .tab-button.active {
+            background-color: var(--mau-den);
+            color: var(--mau-trang);
+            border-color: var(--mau-den);
+        }
+        .payment-form { display: flex; flex-direction: column; gap: 1rem; }
+        .payment-form input {
+            padding: 0.8rem 1rem;
+            font-size: 1rem;
+            border: 1px solid var(--mau-vien);
+            border-radius: 8px;
+            box-sizing: border-box; 
+        }
+        
+        /* === SỬA LỖI GIAO DIỆN TẠI ĐÂY === */
+        .visa-row {
+            display: flex;
+            justify-content: space-between; /* Dàn đều các phần tử */
+            gap: 1rem;
+        }
+        .visa-row input {
+            /* Tính toán chiều rộng chính xác: 50% trừ đi một nửa khoảng cách (gap) */
+            width: calc(50% - 0.5rem);
+        }
+
+        .btn-xac-thuc { padding: 1rem; font-size: 1.1rem; font-weight: bold; color: var(--mau-trang); background: var(--mau-gradient); border: none; border-radius: 8px; cursor: pointer; margin-top: 1rem; }
+    </style>
+</head>
+<body>
+
+    <main class="container-gio-hang">
+        <section class="danh-sach-san-pham">
+             <header class="header-gio-hang"><h1>Giỏ hàng</h1><span id="so-luong-muc">3 món</span></header>
+            <article class="san-pham" data-id="1"><div class="checkbox-container"><input type="checkbox" id="check-1" class="checkbox-san-pham" checked><label for="check-1"></label></div><img src="https://images.unsplash.com/photo-1572490122747-3968b75cc699?ixlib=rb-4.0.3&q=85&fm=jpg&crop=entropy&cs=srgb&w=300" alt="Trà sữa"><div class="thong-tin-san-pham"><h4>Trà Sữa Trân Châu</h4><p class="mo-ta-san-pham">Vị trà sữa truyền thống</p><p class="gia-san-pham" data-gia="50000">50,000đ</p></div><div class="dieu-khien-so-luong"><button class="btn-giam">-</button><span class="so-luong">1</span><button class="btn-tang">+</button></div><div class="tong-tien-san-pham">50,000đ</div><button class="btn-xoa-san-pham">&times;</button></article>
+            <article class="san-pham" data-id="2"><div class="checkbox-container"><input type="checkbox" id="check-2" class="checkbox-san-pham" checked><label for="check-2"></label></div><img src="https://images.unsplash.com/photo-1511920183353-3c9c9b0a1a4c?ixlib=rb-4.0.3&q=85&fm=jpg&crop=entropy&cs=srgb&w=300" alt="Cà phê"><div class="thong-tin-san-pham"><h4>Cà Phê Sữa Đá</h4><p class="mo-ta-san-pham">Đậm vị cà phê Việt</p><p class="gia-san-pham" data-gia="35000">35,000đ</p></div><div class="dieu-khien-so-luong"><button class="btn-giam">-</button><span class="so-luong">2</span><button class="btn-tang">+</button></div><div class="tong-tien-san-pham">70,000đ</div><button class="btn-xoa-san-pham">&times;</button></article>
+            <article class="san-pham" data-id="3"><div class="checkbox-container"><input type="checkbox" id="check-3" class="checkbox-san-pham" checked><label for="check-3"></label></div><img src="https://images.unsplash.com/photo-1600271886742-f049cd451bba?ixlib=rb-4.0.3&q=85&fm=jpg&crop=entropy&cs=srgb&w=300" alt="Nước ép"><div class="thong-tin-san-pham"><h4>Nước Ép Cam Vắt</h4><p class="mo-ta-san-pham">Tươi ngon, giàu Vitamin C</p><p class="gia-san-pham" data-gia="40000">40,000đ</p></div><div class="dieu-khien-so-luong"><button class="btn-giam">-</button><span class="so-luong">1</span><button class="btn-tang">+</button></div><div class="tong-tien-san-pham">40,000đ</div><button class="btn-xoa-san-pham">&times;</button></article>
+        </section>
+        <aside class="tom-tat-don-hang"><h2>Tóm tắt đơn hàng</h2><div class="chi-tiet-gia"><div><span>Tạm tính</span><span id="tam-tinh"></span></div><div><span>Phí giao hàng</span><span>15,000đ</span></div><div class="tong-cong"><span>Tổng cộng</span><span id="tong-cong"></span></div></div><p id="thong-bao-chon-mon" class="hidden">Vui lòng chọn một món để thanh toán</p><button id="nut-thanh-toan" class="btn-thanh-toan">Thanh toán</button></aside>
+    </main>
+    
+    <div id="payment-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Thanh toán</h2>
+                <button class="close-button">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="payment-tabs">
+                    <button class="tab-button active" data-form="momo-form">MoMo</button>
+                    <button class="tab-button" data-form="visa-form">Visa</button>
+                </div>
+                <div id="momo-form" class="payment-form">
+                    <input type="tel" placeholder="Nhập số điện thoại MoMo">
+                </div>
+                <div id="visa-form" class="payment-form" style="display: none;">
+                    <input type="text" placeholder="Số thẻ">
+                    <div class="visa-row">
+                        <input type="text" placeholder="MM/YY">
+                        <input type="text" placeholder="CVC/CVV">
+                    </div>
+                </div>
+                <button class="btn-xac-thuc">Xác thực</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Phần JavaScript không thay đổi
+        document.addEventListener('DOMContentLoaded', function () {
+            const PHI_GIAO_HANG = 15000;
+            const dinhDangTien = (soTien) => { if (!soTien || soTien < 0) return '0đ'; return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(soTien); };
+            const capNhatGioHang = () => {
+                const tatCaSanPham = document.querySelectorAll('.san-pham');
+                let tongTienTamTinh = 0; let soMucDuocChon = 0;
+                tatCaSanPham.forEach(sanPham => {
+                    const checkbox = sanPham.querySelector('.checkbox-san-pham');
+                    const gia = parseInt(sanPham.querySelector('.gia-san-pham').dataset.gia);
+                    const soLuong = parseInt(sanPham.querySelector('.so-luong').textContent);
+                    const tongTienSanPhamEl = sanPham.querySelector('.tong-tien-san-pham');
+                    tongTienSanPhamEl.textContent = dinhDangTien(gia * soLuong);
+                    if (checkbox.checked) { tongTienTamTinh += gia * soLuong; soMucDuocChon++; }
+                });
+                document.getElementById('tam-tinh').textContent = dinhDangTien(tongTienTamTinh);
+                const tongCong = tongTienTamTinh > 0 ? tongTienTamTinh + PHI_GIAO_HANG : 0;
+                document.getElementById('tong-cong').textContent = dinhDangTien(tongCong);
+                document.getElementById('so-luong-muc').textContent = `${tatCaSanPham.length} món`;
+                const nutThanhToan = document.getElementById('nut-thanh-toan');
+                const thongBao = document.getElementById('thong-bao-chon-mon');
+                if (soMucDuocChon === 0) { nutThanhToan.disabled = true; thongBao.classList.remove('hidden'); } 
+                else { nutThanhToan.disabled = false; thongBao.classList.add('hidden'); }
+            };
+
+            const khoiTaoSuKien = () => {
+                const khuVucSanPham = document.querySelector('.danh-sach-san-pham');
+                khuVucSanPham.addEventListener('click', function (event) {
+                    const phanTuDuocClick = event.target;
+                    const sanPham = phanTuDuocClick.closest('.san-pham');
+                    if (!sanPham) return;
+                    if (phanTuDuocClick.matches('.btn-tang')) { const soLuongEl = sanPham.querySelector('.so-luong'); soLuongEl.textContent = parseInt(soLuongEl.textContent) + 1; capNhatGioHang(); }
+                    if (phanTuDuocClick.matches('.btn-giam')) { const soLuongEl = sanPham.querySelector('.so-luong'); let soLuongHienTai = parseInt(soLuongEl.textContent); if (soLuongHienTai > 1) { soLuongEl.textContent = soLuongHienTai - 1; capNhatGioHang(); } }
+                    if (phanTuDuocClick.matches('.btn-xoa-san-pham')) { sanPham.remove(); capNhatGioHang(); }
+                });
+                khuVucSanPham.addEventListener('change', function(event){ if (event.target.matches('.checkbox-san-pham')) { capNhatGioHang(); } });
+
+                const nutThanhToanChinh = document.getElementById('nut-thanh-toan');
+                const modal = document.getElementById('payment-modal');
+                const nutDongModal = document.querySelector('.close-button');
+                const nutXacThuc = document.querySelector('.btn-xac-thuc');
+                const cacTabThanhToan = document.querySelectorAll('.tab-button');
+                const cacFormThanhToan = document.querySelectorAll('.payment-form');
+
+                nutThanhToanChinh.addEventListener('click', function() { modal.style.display = 'flex'; });
+                nutDongModal.addEventListener('click', function() { modal.style.display = 'none'; });
+
+                cacTabThanhToan.forEach(tab => {
+                    tab.addEventListener('click', function() {
+                        cacTabThanhToan.forEach(innerTab => innerTab.classList.remove('active'));
+                        tab.classList.add('active');
+                        const formId = tab.dataset.form;
+                        cacFormThanhToan.forEach(form => form.style.display = 'none');
+                        document.getElementById(formId).style.display = 'flex';
+                    });
+                });
+
+                nutXacThuc.addEventListener('click', async function() {
+                    const activeTab = document.querySelector('.tab-button.active');
+                    const paymentMethod = activeTab.dataset.form;
+                    nutXacThuc.disabled = true;
+                    nutXacThuc.textContent = 'Đang xử lý...';
+                    const tongCongText = document.getElementById('tong-cong').textContent;
+                    const soTien = parseInt(tongCongText.replace(/[^0-9]/g, ''));
+
+                    if (paymentMethod === 'momo-form') {
+                        try {
+                            const yeuCauThanhToan = { amount: soTien };
+                            const phanHoi = await fetch('http://localhost:8080/api/payment/create', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(yeuCauThanhToan),
+                            });
+                            if (!phanHoi.ok) { throw new Error('Phản hồi từ server không OK'); }
+                            const duLieuPhanHoi = await phanHoi.json();
+                            if (duLieuPhanHoi.paymentUrl) {
+                                alert("Đang chuyển hướng đến cổng thanh toán MoMo...");
+                                window.open(duLieuPhanHoi.paymentUrl, '_blank');
+                                modal.style.display = 'none';
+                                nutThanhToanChinh.textContent = 'Chờ xác nhận MoMo';
+                            }
+                        } catch (error) {
+                            console.error('Co loi khi goi API thanh toan:', error);
+                            alert('Không thể kết nối đến backend. Hãy đảm bảo ứng dụng Java của bạn đang chạy.');
+                        }
+                    }
+
+                    if (paymentMethod === 'visa-form') {
+                        setTimeout(() => {
+                            modal.style.display = 'none';
+                            alert('Thanh toán qua Visa thành công!');
+                            nutThanhToanChinh.textContent = 'Đã thanh toán';
+                            nutThanhToanChinh.disabled = true;
+                        }, 2000);
+                    }
+                    
+                    setTimeout(() => {
+                        nutXacThuc.disabled = false;
+                        nutXacThuc.textContent = 'Xác thực';
+                    }, 2000);
+                });
+            };
+            khoiTaoSuKien();
+            capNhatGioHang();
+        });
+    </script>
+
+</body>
+</html>
