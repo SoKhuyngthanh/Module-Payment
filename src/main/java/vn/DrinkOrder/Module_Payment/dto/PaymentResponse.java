@@ -9,4 +9,5 @@ public class PaymentResponse {
     private String status;
     private String message;
     private String paymentUrl;
+    private Long donHangId;
 }
