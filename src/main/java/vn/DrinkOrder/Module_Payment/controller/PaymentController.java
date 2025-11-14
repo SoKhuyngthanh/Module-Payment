@@ -46,6 +46,7 @@ public class PaymentController {
         donHangRepo.save(donHang);
 
         ThanhToan thanhToan = new ThanhToan();
+        
         thanhToan.setDonHang(donHang);
         thanhToan.setPhuongThuc(phuongThuc);
         thanhToan.setTrangThaiThanhToan("Da thanh toan");
