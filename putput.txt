@@ -1,0 +1,737 @@
+
+
+File: F:\Web-Project\Module-Payment\src\main\java\vn\DrinkOrder\Module_Payment\controller\PaymentController.java
+```java
+package vn.DrinkOrder.Module_Payment.controller;
+
+import java.time.LocalDateTime;
+import java.util.Map;
+
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import lombok.RequiredArgsConstructor;
+import vn.DrinkOrder.Module_Payment.dto.PaymentRequest;
+import vn.DrinkOrder.Module_Payment.dto.PaymentResponse;
+import vn.DrinkOrder.Module_Payment.entity.DonHang;
+import vn.DrinkOrder.Module_Payment.entity.ThanhToan;
+import vn.DrinkOrder.Module_Payment.repository.DonHangRepository;
+import vn.DrinkOrder.Module_Payment.repository.ThanhToanRepository;
+
+@RestController
+@RequestMapping("/api/payment")
+@RequiredArgsConstructor
+public class PaymentController {
+
+    private final DonHangRepository donHangRepo;
+    private final ThanhToanRepository thanhToanRepo;
+
+    // API 1: TẠO ĐƠN HÀNG 
+    @PostMapping("/create")
+    public PaymentResponse createPayment(@RequestBody PaymentRequest request) {
+        DonHang donHang = new DonHang();
+        donHang.setTongTien((double) request.getAmount());
+        donHang.setTrangThaiDonHang("Chua thanh toan");
+        donHangRepo.save(donHang);
+
+        // Tạo nội dung chuyển khoản ngắn gọn: DH + [ID]
+        String paymentInfo = "DH" + donHang.getId();
+        
+        // Thông tin tài khoản (Demo)
+        final String BANK_BIN = "970436"; 
+        final String ACCOUNT_NO = "0123456789"; 
+
+        // Link QR
+        String paymentUrl = String.format(
+                "https://img.vietqr.io/image/%s-%s-compact.png?amount=%d&addInfo=%s",
+                BANK_BIN, ACCOUNT_NO, request.getAmount(), paymentInfo
+        );
+
+        return new PaymentResponse("OK", "Tao don hang thanh cong", paymentUrl, donHang.getId());
+    }
+
+    // API 2: KIỂM TRA TRẠNG THÁI ĐƠN HÀNG (Mới)
+    // Frontend sẽ gọi API này liên tục (Polling) để xem tiền đã về chưa
+    @GetMapping("/check-status")
+    public ResponseEntity<?> checkPaymentStatus(@RequestParam Long donHangId) {
+        DonHang donHang = donHangRepo.findById(donHangId)
+                .orElseThrow(() -> new RuntimeException("Khong tim thay don hang"));
+
+        return ResponseEntity.ok(Map.of(
+            "donHangId", donHangId,
+            "status", donHang.getTrangThaiDonHang() // Trả về chuỗi gốc: "Da thanh toan", "That bai", "Chua thanh toan"
+        ));
+    }
+
+    // API 3: GIẢ LẬP NGÂN HÀNG BÁO CÓ (Sandbox Trigger)
+    // API này đóng vai trò là "Webhook" từ ngân hàng hoặc hành động chuyển khoản thành công
+    @PostMapping("/sandbox/confirm")
+    public ResponseEntity<?> sandboxConfirmPayment(@RequestParam Long donHangId) {
+        DonHang donHang = donHangRepo.findById(donHangId)
+                .orElseThrow(() -> new RuntimeException("Khong tim thay don hang"));
+
+        if ("Da thanh toan".equals(donHang.getTrangThaiDonHang())) {
+            return ResponseEntity.badRequest().body("Don hang nay da duoc thanh toan truoc do");
+        }
+
+        // Cập nhật trạng thái
+        donHang.setTrangThaiDonHang("Da thanh toan");
+        donHangRepo.save(donHang);
+
+        // Lưu lịch sử
+        ThanhToan thanhToan = new ThanhToan();
+        thanhToan.setDonHang(donHang);
+        thanhToan.setPhuongThuc("VietQR_Sandbox");
+        thanhToan.setTrangThaiThanhToan("Da thanh toan");
+        thanhToan.setNgayThanhToan(LocalDateTime.now());
+        thanhToanRepo.save(thanhToan);
+
+        return ResponseEntity.ok(Map.of("message", "Gia lap thanh toan thanh cong! Server da nhan duoc tien."));
+    }
+    // API MỚI: GIẢ LẬP THANH TOÁN THẤT BẠI / HẾT HẠN
+    @PostMapping("/sandbox/fail")
+    public ResponseEntity<?> sandboxFailPayment(@RequestParam Long donHangId) {
+        DonHang donHang = donHangRepo.findById(donHangId)
+                .orElseThrow(() -> new RuntimeException("Khong tim thay don hang"));
+
+        if ("Da thanh toan".equals(donHang.getTrangThaiDonHang())) {
+            return ResponseEntity.badRequest().body("Don hang nay da thanh toan, khong the huy");
+        }
+
+        // Cập nhật trạng thái Thất bại
+        donHang.setTrangThaiDonHang("That bai");
+        donHangRepo.save(donHang);
+
+        // Lưu lịch sử lỗi (Optional)
+        ThanhToan thanhToan = new ThanhToan();
+        thanhToan.setDonHang(donHang);
+        thanhToan.setPhuongThuc("VietQR_Sandbox");
+        thanhToan.setTrangThaiThanhToan("Giao dich that bai / Het han");
+        thanhToan.setNgayThanhToan(LocalDateTime.now());
+        thanhToanRepo.save(thanhToan);
+
+        return ResponseEntity.ok(Map.of("message", "Da cap nhat trang thai don hang thanh That bai"));
+    }
+    @PostMapping("/sandbox/webhook-simulation")
+    public ResponseEntity<?> simulateVietQRCallback(@RequestBody Map<String, Object> callbackData) {
+        // 1. Lấy thông tin từ gói tin JSON 
+        String content = (String) callbackData.get("content"); // Ví dụ: "Thanh toan don hang 123"
+        Integer amount = (Integer) callbackData.get("amount");
+        
+        // 2. Phân tích nội dung để lấy ID đơn hàng 
+        // Logic tách chuỗi đơn giản để demo
+        Long donHangId = null;
+        try {
+             // Giả sử content là "DH1" -> Lấy số 1
+             String idStr = content.replaceAll("[^0-9]", "");
+             donHangId = Long.parseLong(idStr);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body("Nội dung chuyển khoản không hợp lệ");
+        }
+
+        // 3. Tìm đơn hàng
+        DonHang donHang = donHangRepo.findById(donHangId)
+                .orElseThrow(() -> new RuntimeException("Khong tim thay don hang"));
+
+        // 4. Kiểm tra số tiền (Quan trọng trong thực tế)
+        if (donHang.getTongTien() > amount.doubleValue()) {
+            return ResponseEntity.badRequest().body("Số tiền chuyển không đủ");
+        }
+
+        // 5. Cập nhật thành công
+        donHang.setTrangThaiDonHang("Da thanh toan");
+        donHangRepo.save(donHang);
+        
+        // Lưu lịch sử
+        ThanhToan thanhToan = new ThanhToan();
+        thanhToan.setDonHang(donHang);
+        thanhToan.setPhuongThuc("VietQR_Callback_Sim");
+        thanhToan.setTrangThaiThanhToan("Da thanh toan");
+        thanhToan.setNgayThanhToan(LocalDateTime.now());
+        thanhToanRepo.save(thanhToan);
+
+        return ResponseEntity.ok(Map.of("status", "SUCCESS", "message", "Webhook received"));
+    }
+}
+```
+
+
+
+File: F:\Web-Project\Module-Payment\src\main\java\vn\DrinkOrder\Module_Payment\dto\PaymentRequest.java
+```java
+package vn.DrinkOrder.Module_Payment.dto;
+
+import lombok.Data;
+
+@Data
+public class PaymentRequest {
+    private long amount;
+}
+
+```
+
+
+
+File: F:\Web-Project\Module-Payment\src\main\java\vn\DrinkOrder\Module_Payment\dto\PaymentResponse.java
+```java
+package vn.DrinkOrder.Module_Payment.dto;
+
+import lombok.AllArgsConstructor;
+import lombok.Data;
+
+@Data
+@AllArgsConstructor
+public class PaymentResponse {
+    private String status;
+    private String message;
+    private String paymentUrl;
+    private Long donHangId;
+}
+
+```
+
+
+
+File: F:\Web-Project\Module-Payment\src\main\java\vn\DrinkOrder\Module_Payment\entity\DonHang.java
+```java
+package vn.DrinkOrder.Module_Payment.entity;
+
+import jakarta.persistence.*;
+import lombok.Data;
+import java.time.LocalDateTime;
+
+@Data
+@Entity
+@Table(name = "don_hang")
+public class DonHang {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    private Double tongTien;
+
+    private String trangThaiDonHang; // "Chua thanh toan" | "Da thanh toan"
+
+    private LocalDateTime ngayTao = LocalDateTime.now();
+}
+
+```
+
+
+
+File: F:\Web-Project\Module-Payment\src\main\java\vn\DrinkOrder\Module_Payment\entity\ThanhToan.java
+```java
+package vn.DrinkOrder.Module_Payment.entity;
+
+import jakarta.persistence.*;
+import lombok.Data;
+import java.time.LocalDateTime;
+
+@Data
+@Entity
+@Table(name = "thanh_toan")
+public class ThanhToan {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne
+    @JoinColumn(name = "id_don_hang")
+    private DonHang donHang;
+
+    private String phuongThuc; // vietqr, visa
+    private String trangThaiThanhToan; // Chua thanh toan | Da thanh toan
+    private LocalDateTime ngayThanhToan;
+}
+
+```
+
+
+
+File: F:\Web-Project\Module-Payment\src\main\java\vn\DrinkOrder\Module_Payment\ModulePaymentApplication.java
+```java
+package vn.DrinkOrder.Module_Payment;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import java.util.TimeZone;
+
+@SpringBootApplication
+public class ModulePaymentApplication {
+    public static void main(String[] args) {
+        // Thiết lập múi giờ mặc định cho toàn bộ ứng dụng Spring Boot
+        TimeZone.setDefault(TimeZone.getTimeZone("Asia/Ho_Chi_Minh"));
+        SpringApplication.run(ModulePaymentApplication.class, args);
+    }
+}
+
+```
+
+
+
+File: F:\Web-Project\Module-Payment\src\main\java\vn\DrinkOrder\Module_Payment\repository\DonHangRepository.java
+```java
+package vn.DrinkOrder.Module_Payment.repository;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import vn.DrinkOrder.Module_Payment.entity.DonHang;
+
+public interface DonHangRepository extends JpaRepository<DonHang, Long> {
+}
+
+```
+
+
+
+File: F:\Web-Project\Module-Payment\src\main\java\vn\DrinkOrder\Module_Payment\repository\ThanhToanRepository.java
+```java
+package vn.DrinkOrder.Module_Payment.repository;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import vn.DrinkOrder.Module_Payment.entity.ThanhToan;
+
+public interface ThanhToanRepository extends JpaRepository<ThanhToan, Long> {
+}
+
+```
+
+
+
+File: F:\Web-Project\Module-Payment\src\main\resources\static\index.html
+```html
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Module Thanh Toán Hoàn Thiện</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/davidshimjs-qrcodejs@0.0.2/qrcode.min.js"></script>
+
+    <style>
+        /* --- GIỮ NGUYÊN CSS CŨ --- */
+        :root { --mau-nen: #f7f8fc; --mau-trang: #ffffff; --mau-chu-chinh: #0a1e42; --mau-chu-phu: #5e6c84; --mau-vien: #dfe1e6; --mau-den: #000000; --mau-xanh-la: #28a745; --mau-do: #dc3545; --mau-gradient: linear-gradient(90deg, #6559ff, #473bff); --vien-mem: 12px; --box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08); }
+        body { font-family: 'Poppins', sans-serif; background-color: var(--mau-nen); color: var(--mau-chu-chinh); margin: 0; padding: 2rem; }
+        .container-gio-hang { display: grid; grid-template-columns: 2fr 1fr; gap: 2rem; max-width: 1200px; margin: auto; }
+        .danh-sach-san-pham, .tom-tat-don-hang { background: var(--mau-trang); border-radius: var(--vien-mem); padding: 1.5rem 2rem; box-shadow: var(--box-shadow); }
+        .header-gio-hang { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--mau-vien); padding-bottom: 1rem; margin-bottom: 1rem; }
+        .header-gio-hang h1 { font-size: 1.5rem; margin: 0; }
+        #so-luong-muc { font-size: 1rem; color: var(--mau-chu-phu); }
+        .san-pham { display: grid; grid-template-columns: auto 80px 1fr 120px 100px auto; gap: 1.5rem; align-items: center; padding: 1rem 0; border-bottom: 1px solid var(--mau-vien); }
+        .san-pham:last-child { border-bottom: none; }
+        .san-pham img { width: 80px; height: 80px; border-radius: 8px; object-fit: cover; }
+        .thong-tin-san-pham h4 { margin: 0 0 0.25rem; font-size: 1rem; font-weight: 600; }
+        .mo-ta-san-pham { margin: 0; font-size: 0.875rem; color: var(--mau-chu-phu); }
+        .gia-san-pham { font-weight: 500; color: var(--mau-chu-phu); margin: 0.5rem 0 0; }
+        .dieu-khien-so-luong { display: flex; align-items: center; justify-content: center; background-color: var(--mau-nen); border-radius: 20px; }
+        .dieu-khien-so-luong button { background: none; border: none; cursor: pointer; font-size: 1.2rem; padding: 0.5rem 0.75rem; color: var(--mau-chu-phu); }
+        .so-luong { font-weight: 600; padding: 0 0.5rem; }
+        .tong-tien-san-pham { font-weight: 600; font-size: 1.1rem; text-align: right; }
+        .btn-xoa-san-pham { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--mau-chu-phu); transition: color 0.2s; }
+        .btn-xoa-san-pham:hover { color: #ff5630; }
+        .checkbox-container { display: inline-block; }
+        .checkbox-san-pham { display: none; }
+        .checkbox-san-pham + label { display: inline-block; width: 22px; height: 22px; border: 2px solid var(--mau-vien); border-radius: 6px; cursor: pointer; position: relative; transition: all 0.2s; }
+        .checkbox-san-pham:checked + label { background-color: var(--mau-den); border-color: var(--mau-den); }
+        .checkbox-san-pham:checked + label::after { content: '✔'; font-size: 14px; color: var(--mau-trang); position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+        .trang-thai-san-pham { font-size: 0.75rem; font-weight: 600; padding: 3px 10px; border-radius: 20px; color: white; display: inline-block; margin-top: 4px; }
+        .chua-thanh-toan { background-color: var(--mau-do); border: 1px solid #c82333; }
+        .da-thanh-toan { background-color: var(--mau-xanh-la); border: 1px solid #218838; }
+        .that-bai { background-color: #6c757d; border: 1px solid #545b62; }
+        .san-pham[data-trang-thai="da"] .checkbox-container { visibility: hidden; }
+        .san-pham[data-trang-thai="da"] .dieu-khien-so-luong button { pointer-events: none; color: #ccc; }
+        .tom-tat-don-hang { position: sticky; top: 2rem; }
+        .tom-tat-don-hang h2 { font-size: 1.25rem; margin: 0 0 1.5rem; border-bottom: 1px solid var(--mau-vien); padding-bottom: 1rem; }
+        .chi-tiet-gia div { display: flex; justify-content: space-between; margin-bottom: 1rem; color: var(--mau-chu-phu); font-size: 1rem; }
+        .chi-tiet-gia .tong-cong { font-size: 1.1rem; font-weight: 600; color: var(--mau-chu-chinh); margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--mau-vien); }
+        .btn-thanh-toan { width: 100%; padding: 1rem; border: none; background: var(--mau-gradient); color: var(--mau-trang); font-size: 1.1rem; font-weight: bold; border-radius: 8px; cursor: pointer; margin-top: 1rem; transition: transform 0.2s, box-shadow 0.2s; }
+        .btn-thanh-toan:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(71, 59, 255, 0.3); }
+        .btn-thanh-toan:disabled { background: #ccc; cursor: not-allowed; transform: none; box-shadow: none; }
+        #thong-bao-chon-mon { color: #ff5630; text-align: center; font-size: 0.875rem; margin-top: 1rem; }
+        .hidden { display: none; }
+
+        /* --- CSS MODAL --- */
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); justify-content: center; align-items: center; }
+        .modal-content { background-color: var(--mau-nen); width: 100%; max-width: 400px; border-radius: var(--vien-mem); box-shadow: 0 5px 25px rgba(0,0,0,0.2); position: relative; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.5rem; background-color: #e9ecef; border-top-left-radius: var(--vien-mem); border-top-right-radius: var(--vien-mem); }
+        .modal-header h2 { font-size: 1.1rem; margin: 0; color: var(--mau-chu-phu); }
+        .close-button { font-size: 1.5rem; cursor: pointer; border: none; background: none; }
+        .modal-body { padding: 1.5rem; }
+        .payment-tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+        .tab-button { flex: 1; padding: 0.75rem; font-size: 1rem; font-weight: 500; border: 1px solid var(--mau-vien); background-color: var(--mau-trang); border-radius: 8px; cursor: pointer; transition: all 0.2s; }
+        .tab-button.active { background-color: var(--mau-den); color: var(--mau-trang); border-color: var(--mau-den); }
+        .payment-form { display: flex; flex-direction: column; gap: 1rem; }
+        .qr-instruction { text-align: center; color: var(--mau-chu-phu); margin-bottom: 0.5rem; }
+        #qrcode-container { display: flex; justify-content: center; align-items: center; padding: 1rem; background-color: white; border-radius: 8px; border: 1px solid var(--mau-vien); }
+        
+        /* --- CSS MỚI: COUNTDOWN & SANDBOX --- */
+        .timer-container { text-align: center; margin-bottom: 10px; color: #dc3545; font-weight: 600; font-size: 0.9rem; }
+        .loading-container { text-align: center; margin-top: 15px; }
+        .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #6559ff; border-radius: 50%; width: 25px; height: 25px; animation: spin 1s linear infinite; margin: 0 auto 5px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .waiting-text { font-size: 0.9rem; color: #666; font-style: italic; }
+
+        .sandbox-area { margin-top: 20px; padding: 10px; background-color: #f1f2f6; border: 1px dashed #999; border-radius: 8px; text-align: center; }
+        .sandbox-title { font-size: 0.75rem; font-weight: bold; color: #555; display: block; margin-bottom: 5px; text-transform: uppercase; }
+        .sandbox-buttons { display: flex; gap: 10px; }
+        .btn-sandbox { flex: 1; border: none; padding: 8px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.8rem; transition: opacity 0.2s; color: white; }
+        .btn-success-sim { background-color: #28a745; }
+        .btn-fail-sim { background-color: #dc3545; }
+        .btn-sandbox:hover { opacity: 0.9; }
+
+        /* --- SUCCESS & FAIL OVERLAY (ĐÃ CHỈNH SỬA) --- */
+        .success-overlay, .fail-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7); justify-content: center; align-items: center; z-index: 2000; }
+        .success-box { background-color: white; padding: 3rem 4rem; border-radius: var(--vien-mem); text-align: center; transform: scale(0.9); animation: zoomIn 0.3s ease-out forwards; }
+        
+        @keyframes zoomIn { to { transform: scale(1); } }
+        
+        /* Animation Thành công (Xanh) */
+        .checkmark__circle { stroke-dasharray: 166; stroke-dashoffset: 166; stroke-width: 3; stroke-miterlimit: 10; stroke: var(--mau-xanh-la); fill: none; animation: stroke 0.6s cubic-bezier(0.65, 0, 0.45, 1) forwards; }
+        .checkmark { width: 80px; height: 80px; border-radius: 50%; display: block; stroke-width: 3; stroke: #fff; stroke-miterlimit: 10; margin: 0 auto; box-shadow: inset 0px 0px 0px var(--mau-xanh-la); animation: fill .4s ease-in-out .4s forwards, scale .3s ease-in-out .9s both; }
+        .checkmark__check { transform-origin: 50% 50%; stroke-dasharray: 48; stroke-dashoffset: 48; animation: stroke 0.3s cubic-bezier(0.65, 0, 0.45, 1) 0.8s forwards; }
+        
+        /* Animation Thất bại (Đỏ) */
+        .checkmark.error { box-shadow: inset 0px 0px 0px var(--mau-do); animation: fill-error .4s ease-in-out .4s forwards, shake .5s ease-in-out .9s both; }
+        .checkmark__circle.error { stroke: var(--mau-do); }
+        .checkmark__check.error { stroke-dasharray: 48; stroke-dashoffset: 48; animation: stroke 0.3s cubic-bezier(0.65, 0, 0.45, 1) 0.8s forwards; }
+
+        @keyframes stroke { 100% { stroke-dashoffset: 0; } } 
+        @keyframes scale { 0%, 100% { transform: none; } 50% { transform: scale3d(1.1, 1.1, 1); } } 
+        @keyframes fill { 100% { box-shadow: inset 0px 0px 0px 50px var(--mau-xanh-la); } }
+        
+        /* Animation màu đỏ cho lỗi */
+        @keyframes fill-error { 100% { box-shadow: inset 0px 0px 0px 50px var(--mau-do); } }
+        @keyframes shake { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); } 20%, 40%, 60%, 80% { transform: translateX(5px); } }
+    </style>
+</head>
+<body>
+
+    <main class="container-gio-hang">
+        <section class="danh-sach-san-pham">
+            <header class="header-gio-hang"><h1>Giỏ hàng</h1><span id="so-luong-muc"></span></header>
+            
+            <article class="san-pham" data-id="1" data-trang-thai="chua">
+                <div class="checkbox-container"><input type="checkbox" id="check-1" class="checkbox-san-pham" checked><label for="check-1"></label></div>
+                <img src="https://images.unsplash.com/photo-1572490122747-3968b75cc699?ixlib=rb-4.0.3&q=85&fm=jpg&crop=entropy&cs=srgb&w=300" alt="Trà sữa">
+                <div class="thong-tin-san-pham">
+                    <h4>Trà Sữa Trân Châu</h4>
+                    <p class="mo-ta-san-pham">Vị trà sữa truyền thống</p>
+                    <div class="trang-thai-san-pham chua-thanh-toan">Chưa thanh toán</div>
+                    <p class="gia-san-pham" data-gia="50000">50,000đ</p>
+                </div>
+                <div class="dieu-khien-so-luong"><button class="btn-giam">-</button><span class="so-luong">1</span><button class="btn-tang">+</button></div>
+                <div class="tong-tien-san-pham"></div><button class="btn-xoa-san-pham">&times;</button>
+            </article>
+
+            <article class="san-pham" data-id="2" data-trang-thai="chua">
+                <div class="checkbox-container"><input type="checkbox" id="check-2" class="checkbox-san-pham" checked><label for="check-2"></label></div>
+                <img src="https://images.unsplash.com/photo-1511920183353-3c9c9b0a1a4c?ixlib=rb-4.0.3&q=85&fm=jpg&crop=entropy&cs=srgb&w=300" alt="Cà phê">
+                <div class="thong-tin-san-pham">
+                    <h4>Cà Phê Sữa Đá</h4>
+                    <p class="mo-ta-san-pham">Đậm vị cà phê Việt</p>
+                    <div class="trang-thai-san-pham chua-thanh-toan">Chưa thanh toán</div>
+                    <p class="gia-san-pham" data-gia="35000">35,000đ</p>
+                </div>
+                <div class="dieu-khien-so-luong"><button class="btn-giam">-</button><span class="so-luong">2</span><button class="btn-tang">+</button></div>
+                <div class="tong-tien-san-pham"></div><button class="btn-xoa-san-pham">&times;</button>
+            </article>
+
+            <article class="san-pham" data-id="3" data-trang-thai="chua">
+                <div class="checkbox-container"><input type="checkbox" id="check-3" class="checkbox-san-pham" checked><label for="check-3"></label></div>
+                <img src="https://images.unsplash.com/photo-1600271886742-f049cd451bba?ixlib=rb-4.0.3&q=85&fm=jpg&crop=entropy&cs=srgb&w=300" alt="Nước ép">
+                <div class="thong-tin-san-pham">
+                    <h4>Nước Ép Cam Vắt</h4>
+                    <p class="mo-ta-san-pham">Tươi ngon, giàu Vitamin C</p>
+                    <div class="trang-thai-san-pham chua-thanh-toan">Chưa thanh toán</div>
+                    <p class="gia-san-pham" data-gia="40000">40,000đ</p>
+                </div>
+                <div class="dieu-khien-so-luong"><button class="btn-giam">-</button><span class="so-luong">1</span><button class="btn-tang">+</button></div>
+                <div class="tong-tien-san-pham"></div><button class="btn-xoa-san-pham">&times;</button>
+            </article>
+
+            <article class="san-pham" data-id="4" data-trang-thai="chua">
+                <div class="checkbox-container"><input type="checkbox" id="check-4" class="checkbox-san-pham" checked><label for="check-4"></label></div>
+                <img src="https://images.unsplash.com/photo-1626859336140-5bb947b1923e?ixlib=rb-4.0.3&q=85&fm=jpg&crop=entropy&cs=srgb&w=300" alt="Trà Đào">
+                <div class="thong-tin-san-pham">
+                    <h4>Trà Đào Cam Sả</h4>
+                    <p class="mo-ta-san-pham">Thanh mát, giải nhiệt</p>
+                    <div class="trang-thai-san-pham chua-thanh-toan">Chưa thanh toán</div>
+                    <p class="gia-san-pham" data-gia="45000">45,000đ</p>
+                </div>
+                <div class="dieu-khien-so-luong"><button class="btn-giam">-</button><span class="so-luong">1</span><button class="btn-tang">+</button></div>
+                <div class="tong-tien-san-pham"></div><button class="btn-xoa-san-pham">&times;</button>
+            </article>
+        </section>
+        <aside class="tom-tat-don-hang"><h2>Tóm tắt đơn hàng</h2><div class="chi-tiet-gia"><div><span>Tạm tính</span><span id="tam-tinh"></span></div><div><span>Phí giao hàng</span><span>15,000đ</span></div><div class="tong-cong"><span>Tổng cộng</span><span id="tong-cong"></span></div></div><p id="thong-bao-chon-mon" class="hidden">Vui lòng chọn một món để thanh toán</p><button id="nut-thanh-toan" class="btn-thanh-toan">Thanh toán</button></aside>
+    </main>
+    
+    <div id="payment-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Thanh toán</h2>
+                <button class="close-button">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="payment-tabs">
+                    <button class="tab-button active" data-form="vietqr-form">VietQR</button>
+                    <button class="tab-button" data-form="visa-form">Visa</button>
+                </div>
+                
+                <div id="vietqr-form" class="payment-form">
+                    <div class="timer-container">Hết hạn sau: <span id="countdown">00:15</span></div>
+
+                    <p class="qr-instruction">Quét mã bằng App Ngân hàng</p>
+                    <div id="qrcode-container"></div>
+                    
+                    <div class="loading-container">
+                        <div class="spinner"></div>
+                        <div class="waiting-text">Hệ thống đang kiểm tra giao dịch...</div>
+                    </div>
+
+                    <div class="sandbox-area">
+                        <span class="sandbox-title">🛠 Dev Tools (Giả lập Ngân hàng)</span>
+                        <div class="sandbox-buttons">
+                            <button id="btn-sandbox-confirm" class="btn-sandbox btn-success-sim">✅ Thành công</button>
+                            <button id="btn-sandbox-fail" class="btn-sandbox btn-fail-sim">❌ Thất bại</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="visa-form" class="payment-form" style="display: none;">
+                    <p style="text-align: center; color: #666;">Chức năng Demo Visa</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="success-overlay" class="success-overlay">
+        <div class="success-box">
+            <svg class="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
+                <circle class="checkmark__circle" cx="26" cy="26" r="25" fill="none" />
+                <path class="checkmark__check" fill="none" d="M14.1 27.2l7.1 7.2 16.7-16.8" />
+            </svg>
+            <h2 style="color: #28a745;">Thanh toán thành công!</h2>
+        </div>
+    </div>
+
+    <div id="fail-overlay" class="fail-overlay">
+        <div class="success-box">
+            <svg class="checkmark error" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
+                <circle class="checkmark__circle error" cx="26" cy="26" r="25" fill="none" />
+                <path class="checkmark__check error" fill="none" d="M16 16 L36 36 M36 16 L16 36" />
+            </svg>
+            <h2 style="color: #dc3545;">Thanh toán thất bại!</h2>
+            <p style="color: #666; font-size: 0.9rem;">Giao dịch bị lỗi hoặc quá hạn.</p>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const PHI_GIAO_HANG = 15000;
+            const dinhDangTien = (soTien) => { if (!soTien || soTien < 0) return '0đ'; return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(soTien); };
+
+            let danhSachDangThanhToan = [];
+            let currentDonHangId = null;
+            let pollingInterval = null;
+            let countdownInterval = null;
+
+            // --- GIỮ NGUYÊN HÀM CẬP NHẬT GIỎ HÀNG ---
+            const capNhatGioHang = () => {
+                const tatCaSanPham = document.querySelectorAll('.san-pham');
+                let tongTienTamTinh = 0;
+                let soMucDuocChon = 0;
+                tatCaSanPham.forEach(sanPham => {
+                    const checkbox = sanPham.querySelector('.checkbox-san-pham');
+                    const gia = parseInt(sanPham.querySelector('.gia-san-pham').dataset.gia);
+                    const soLuong = parseInt(sanPham.querySelector('.so-luong').textContent);
+                    sanPham.querySelector('.tong-tien-san-pham').textContent = dinhDangTien(gia * soLuong);
+                    if (checkbox.checked && sanPham.dataset.trangThai === 'chua') {
+                        tongTienTamTinh += gia * soLuong;
+                        soMucDuocChon++;
+                    }
+                });
+                document.getElementById('tam-tinh').textContent = dinhDangTien(tongTienTamTinh);
+                const tongCong = (tongTienTamTinh > 0) ? (tongTienTamTinh + PHI_GIAO_HANG) : 0;
+                document.getElementById('tong-cong').textContent = dinhDangTien(tongCong);
+                document.getElementById('so-luong-muc').textContent = `${document.querySelectorAll('.san-pham').length} món`;
+                const nutThanhToan = document.getElementById('nut-thanh-toan');
+                const thongBao = document.getElementById('thong-bao-chon-mon');
+                if (soMucDuocChon > 0) {
+                    nutThanhToan.disabled = false;
+                    thongBao.classList.add('hidden');
+                } else {
+                    nutThanhToan.disabled = true;
+                    if(document.querySelectorAll('.san-pham[data-trang-thai="chua"]').length > 0) thongBao.classList.remove('hidden');
+                    else thongBao.classList.add('hidden');
+                }
+                if (document.querySelectorAll('.san-pham[data-trang-thai="chua"]').length === 0) {
+                    nutThanhToan.disabled = true;
+                    nutThanhToan.textContent = "Tất cả sản phẩm đã thanh toán";
+                }
+            };
+
+            // HÀM ĐẾM NGƯỢC THỜI GIAN
+            const batDauDemNguoc = (duration) => {
+                let timer = duration, minutes, seconds;
+                const display = document.querySelector('#countdown');
+                if (countdownInterval) clearInterval(countdownInterval);
+                
+                countdownInterval = setInterval(function () {
+                    minutes = parseInt(timer / 60, 10);
+                    seconds = parseInt(timer % 60, 10);
+
+                    minutes = minutes < 10 ? "0" + minutes : minutes;
+                    seconds = seconds < 10 ? "0" + seconds : seconds;
+
+                    display.textContent = minutes + ":" + seconds;
+
+                    if (--timer < 0) {
+                        clearInterval(countdownInterval);
+                        xuLyThatBai("Giao dịch hết hạn thanh toán!");
+                    }
+                }, 1000);
+            };
+
+            const xuLyThanhToanThanhCong = () => {
+                const modal = document.getElementById('payment-modal');
+                const successOverlay = document.getElementById('success-overlay');
+                if (pollingInterval) clearInterval(pollingInterval);
+                if (countdownInterval) clearInterval(countdownInterval);
+
+                modal.style.display = 'none';
+                successOverlay.style.display = 'flex';
+                
+                setTimeout(() => {
+                    danhSachDangThanhToan.forEach(checkbox => {
+                        const sanPham = checkbox.closest('.san-pham');
+                        sanPham.dataset.trangThai = 'da'; 
+                        const trangThaiDiv = sanPham.querySelector('.trang-thai-san-pham');
+                        trangThaiDiv.textContent = 'Đã thanh toán';
+                        trangThaiDiv.classList.remove('chua-thanh-toan');
+                        trangThaiDiv.classList.add('da-thanh-toan');
+                        checkbox.checked = false; 
+                    });
+                    successOverlay.style.display = 'none';
+                    capNhatGioHang();
+                }, 2000);
+            }
+
+            // --- CẬP NHẬT: HIỆN POPUP ĐỎ KHI THẤT BẠI ---
+            const xuLyThatBai = (message) => {
+                const modal = document.getElementById('payment-modal');
+                const failOverlay = document.getElementById('fail-overlay');
+
+                if (pollingInterval) clearInterval(pollingInterval);
+                if (countdownInterval) clearInterval(countdownInterval);
+                
+                // Gọi API để đánh dấu đơn hàng là thất bại
+                fetch(`/api/payment/sandbox/fail?donHangId=${currentDonHangId}`, { method: 'POST' });
+
+                modal.style.display = 'none';
+                failOverlay.style.display = 'flex'; // Hiện popup đỏ
+
+                // Ẩn sau 2.5 giây
+                setTimeout(() => {
+                    failOverlay.style.display = 'none';
+                    danhSachDangThanhToan = [];
+                    // Không cần bỏ check ở UI, cho phép user thử lại nếu muốn
+                }, 2500);
+            }
+
+            // POLLING: Cập nhật để kiểm tra cả trạng thái Thất Bại
+            const batDauKiemTraThanhToan = (idDonHang) => {
+                if (pollingInterval) clearInterval(pollingInterval);
+                
+                pollingInterval = setInterval(async () => {
+                    try {
+                        const response = await fetch(`/api/payment/check-status?donHangId=${idDonHang}`);
+                        if (response.ok) {
+                            const data = await response.json();
+                            
+                            if (data.status === 'Da thanh toan') {
+                                clearInterval(pollingInterval);
+                                xuLyThanhToanThanhCong();
+                            } else if (data.status === 'That bai') {
+                                clearInterval(pollingInterval);
+                                xuLyThatBai("Giao dịch thất bại");
+                            }
+                        }
+                    } catch (e) { console.error(e); }
+                }, 2000);
+            };
+
+            // INIT SỰ KIỆN
+            const khoiTaoSuKien = () => {
+                const khuVucSanPham = document.querySelector('.danh-sach-san-pham');
+                khuVucSanPham.addEventListener('click', function (event) {
+                    const phanTuDuocClick = event.target;
+                    const sanPham = phanTuDuocClick.closest('.san-pham');
+                    if (!sanPham) return;
+                    if (phanTuDuocClick.matches('.btn-tang')) { const soLuongEl = sanPham.querySelector('.so-luong'); soLuongEl.textContent = parseInt(soLuongEl.textContent) + 1; capNhatGioHang(); }
+                    if (phanTuDuocClick.matches('.btn-giam')) { const soLuongEl = sanPham.querySelector('.so-luong'); let soLuongHienTai = parseInt(soLuongEl.textContent); if (soLuongHienTai > 1) { soLuongEl.textContent = soLuongHienTai - 1; capNhatGioHang(); } }
+                    if (phanTuDuocClick.matches('.btn-xoa-san-pham')) { sanPham.remove(); capNhatGioHang(); }
+                });
+                
+                khuVucSanPham.addEventListener('change', (e) => { if (e.target.matches('.checkbox-san-pham')) capNhatGioHang(); });
+
+                document.querySelector('.close-button').addEventListener('click', () => {
+                    document.getElementById('payment-modal').style.display = 'none';
+                    if (pollingInterval) clearInterval(pollingInterval);
+                    if (countdownInterval) clearInterval(countdownInterval);
+                });
+
+                // NÚT THANH TOÁN
+                document.getElementById('nut-thanh-toan').addEventListener('click', async function() {
+                    const soTien = parseInt(document.getElementById('tong-cong').textContent.replace(/[^0-9]/g, '')) - PHI_GIAO_HANG;
+                    if (soTien <= 0) return;
+                    danhSachDangThanhToan = document.querySelectorAll('.san-pham[data-trang-thai="chua"] .checkbox-san-pham:checked');
+                    
+                    try {
+                        const phanHoi = await fetch('/api/payment/create', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ amount: soTien }),
+                        });
+                        const duLieu = await phanHoi.json();
+                        currentDonHangId = duLieu.donHangId;
+                        
+                        document.getElementById('qrcode-container').innerHTML = '';
+                        new QRCode(document.getElementById('qrcode-container'), { text: duLieu.paymentUrl, width: 200, height: 200 });
+                        
+                        document.getElementById('payment-modal').style.display = 'flex';
+                        
+                        batDauKiemTraThanhToan(currentDonHangId);
+                        batDauDemNguoc(15); 
+                        
+                    } catch (e) { alert('Lỗi tạo đơn'); }
+                });
+
+                // BUTTON: SANDBOX SUCCESS
+                document.getElementById('btn-sandbox-confirm').addEventListener('click', async () => {
+                    if (!currentDonHangId) return;
+                    await fetch(`/api/payment/sandbox/confirm?donHangId=${currentDonHangId}`, { method: 'POST' });
+                });
+
+                // BUTTON: SANDBOX FAIL
+                document.getElementById('btn-sandbox-fail').addEventListener('click', async () => {
+                    if (!currentDonHangId) return;
+                    await fetch(`/api/payment/sandbox/fail?donHangId=${currentDonHangId}`, { method: 'POST' });
+                    // Lúc này hàm Polling sẽ nhận được status 'That bai' và gọi hàm xuLyThatBai() để hiện popup đỏ
+                });
+            };
+
+            khoiTaoSuKien();
+            capNhatGioHang();
+        });
+    </script>
+</body>
+</html>
+```
+
